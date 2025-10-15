@@ -7,12 +7,12 @@ import io
 # Configuração da página
 st.set_page_config(
     page_title="Sadio | Simulador Comercial",
-    page_icon="❤️",
+    page_icon="🧮",
     layout="wide"
 )
 
 # Título da aplicação
-st.title("❤️ Sadio | Simulador Comercial")
+st.title("🧮 Sadio | Simulador Comercial")
 st.markdown("---")
 
 # Função para processar arquivo XLSX
@@ -652,4 +652,5 @@ else:
 st.markdown("---")
 st.markdown(
     "**Sadio | Simulador Comercial** - Para suporte, entre em contato com o administrador do sistema - Daniel Babo."
+
 )
