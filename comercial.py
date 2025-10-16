@@ -462,7 +462,15 @@ if st.session_state.df_produtos is not None:
                 st.caption(f"Equivale a: {desconto_equivalente_percentual:.1f}% de desconto")
             
             # Sincronizar campos
-           col8:
+            col7, col8 = st.columns(2)
+            
+            with col7:
+                if st.button("🔄 Usar % em R$", use_container_width=True):
+                    st.session_state.sync_desconto = 'manual'
+                    st.session_state.last_manual_value = desconto_equivalente_reais
+                    st.rerun()
+            
+            with col8:
                 if st.button("🔄 Usar R$ em %", use_container_width=True):
                     st.session_state.sync_desconto = 'slider'
                     st.session_state.last_slider_value = min(desconto_equivalente_percentual, 50.0)
@@ -646,4 +654,3 @@ st.markdown(
     "**Sadio | Simulador Comercial** - Para suporte, entre em contato com o administrador do sistema - Daniel Babo."
 
 )
-
