@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import requests
 import io
 
 # Configuração da página
@@ -11,219 +12,276 @@ st.set_page_config(
     layout="wide"
 )
 
-# Título da aplicação
-st.title("🧮 Sadio | Simulador Comercial")
-st.markdown("---")
+# =============================================
+# SISTEMA DE LOGIN
+# =============================================
 
-# Função para processar arquivo XLSX
-def processar_xlsx(uploaded_file):
-    """
-    Função para processar arquivo XLSX - estrutura específica do arquivo
-    """
-    try:
-        # Ler o arquivo XLSX sem cabeçalho inicialmente
-        df = pd.read_excel(uploaded_file, engine='openpyxl', header=None)
-        
-        # Exibir informações originais para debug
-        st.sidebar.write(f"📊 Arquivo original: {len(df)} linhas, {len(df.columns)} colunas")
-        
-        # Verificar se temos pelo menos 4 linhas
-        if len(df) < 4:
-            st.error("❌ Arquivo muito pequeno. Necessário pelo menos 4 linhas.")
-            return None
-        
-        # ESTRUTURA DO ARQUIVO:
-        # Linha 0: Cabeçalho geral
-        # Linha 1: (vazia ou com outros dados)
-        # Linha 2: Cabeçalho real (EAN, NCM, Cod, Descrição, QTD, etc.)
-        # Linha 3 em diante: Dados reais
-        
-        # Pegar o cabeçalho real da linha 2 (índice 2)
-        cabecalho_real = df.iloc[2].values.tolist()
-        st.sidebar.write("📝 Cabeçalho real encontrado na linha 3")
-        
-        # Pegar os dados a partir da linha 3 (índice 3)
-        dados = df.iloc[3:]
-        
-        # Criar novo DataFrame com o cabeçalho correto
-        df_processado = pd.DataFrame(dados.values, columns=cabecalho_real)
-        
-        # Excluir a última linha se tiver dados
-        if len(df_processado) > 0:
-            df_processado = df_processado.iloc[:-1].reset_index(drop=True)
-            st.sidebar.write("✅ Última linha removida")
-        
-        # Limpar nomes de colunas
-        df_processado.columns = df_processado.columns.astype(str).str.strip()
-        
-        # Limpar dados - remover linhas completamente vazias
-        df_processado = df_processado.dropna(how='all')
-        
-        st.sidebar.write(f"📊 Arquivo processado: {len(df_processado)} linhas")
-        st.sidebar.write("🔍 Colunas finais:", list(df_processado.columns))
-        
-        return df_processado
-        
-    except Exception as e:
-        st.error(f"❌ Erro ao processar arquivo XLSX: {str(e)}")
-        return None
+USUARIOS = {
+    "ADMIN": "admin123",             
+    "RANIER": "master123",          
+    "ANDRE.RN": "andre123",
+    "PAULINO.RN": "paulino123", 
+    "CHATEAU.RN": "chateau123",
+}
 
-# Função para mapear colunas automaticamente
-def mapear_colunas(df):
-    """
-    Tenta mapear automaticamente as colunas disponíveis para as colunas esperadas
-    """
-    mapeamento = {}
-    colunas_esperadas = ['EAN', 'Descrição', 'QTD', 'Preco CX', 'Preco UN', 'Grupo']
-    colunas_disponiveis = [str(col).strip() for col in df.columns]
+# Definir quais usuários são master (múltiplos usuários)
+USUARIOS_MASTER = ["ADMIN", "RANIER"]
+
+def verificar_login():
+    """Verifica se o usuário está logado"""
+    if 'logado' not in st.session_state:
+        st.session_state.logado = False
+    if 'vendedor_logado' not in st.session_state:
+        st.session_state.vendedor_logado = None
+    if 'eh_master' not in st.session_state:
+        st.session_state.eh_master = False
     
-    st.sidebar.write("🔄 Tentando mapear colunas automaticamente...")
+    return st.session_state.logado
+
+def fazer_login():
+    """Interface de login"""
+    st.title("🔐 Login - Sadio Simulador")
+    st.markdown("---")
     
-    # Mapeamento por padrões conhecidos
-    padroes = {
-        'EAN': ['ean', 'codigo barras', 'código barras', 'codigo de barras'],
-        'Descrição': ['descrição', 'descricao', 'produto', 'nome', 'item'],
-        'QTD': ['qtd', 'quantidade', 'qtde', 'qty', 'quant'],
-        'Preco CX': ['preco cx', 'precocx', 'preço cx', 'preçocx', 'caixa'],
-        'Preco UN': ['preco un', 'precoun', 'preço un', 'preçoun', 'unidade', 'unitário'],
-        'Grupo': ['grupo', 'categoria', 'categ', 'familia', 'família']
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.image("https://via.placeholder.com/150x150/4CAF50/FFFFFF?text=SADIO", width=150)
+    
+    with col2:
+        vendedor = st.selectbox(
+            "👤 Vendedor:",
+            options=[""] + list(USUARIOS.keys()),
+            key="login_vendedor"
+        )
+        
+        senha = st.text_input(
+            "🔒 Senha:",
+            type="password",
+            key="login_senha"
+        )
+        
+        if st.button("🚀 Entrar", use_container_width=True):
+            if vendedor and senha:
+                if vendedor in USUARIOS and USUARIOS[vendedor] == senha:
+                    st.session_state.logado = True
+                    st.session_state.vendedor_logado = vendedor
+                    st.session_state.eh_master = vendedor in USUARIOS_MASTER
+                    st.success(f"✅ Login realizado! Bem-vindo, {vendedor}")
+                    if st.session_state.eh_master:
+                        st.info("👑 **Modo Master Ativado**: Acesso completo a todos os dados")
+                    st.rerun()
+                else:
+                    st.error("❌ Vendedor ou senha incorretos")
+            else:
+                st.warning("⚠️ Preencha todos os campos")
+
+# =============================================
+# CONFIGURAÇÃO - URLs DO GITHUB
+# =============================================
+
+CONFIG_URLS = {
+    "tabela_produtos": "https://raw.githubusercontent.com/dhrbabo/simuladorcomercial/main/tabela_produto.csv",
+    "tabela_parceiros": "https://raw.githubusercontent.com/dhrbabo/simuladorcomercial/main/tabela_parceiro.csv"
+}
+
+# =============================================
+# FUNÇÕES AUXILIARES PARA TRATAMENTO DE DADOS
+# =============================================
+
+def tratar_colunas_numericas(df, colunas):
+    """Converte colunas para formato numérico, tratando vírgulas como separador decimal"""
+    df_tratado = df.copy()
+    
+    for coluna in colunas:
+        if coluna in df_tratado.columns:
+            df_tratado[coluna] = df_tratado[coluna].astype(str)
+            df_tratado[coluna] = df_tratado[coluna].str.replace('.', '', regex=False)
+            df_tratado[coluna] = df_tratado[coluna].str.replace(',', '.', regex=False)
+            df_tratado[coluna] = pd.to_numeric(df_tratado[coluna], errors='coerce')
+    
+    return df_tratado
+
+def verificar_e_corrigir_dados(df, nome_tabela):
+    """Verifica e corrige problemas comuns nos dados"""
+    
+    if nome_tabela == "tabela_produtos":
+        colunas_numericas = ['PRECO_UNITARIO', 'PRECO_CX', 'QUANTIDADE', 'CODPROD', 'CODTAB']
+        df = tratar_colunas_numericas(df, colunas_numericas)
+    
+    elif nome_tabela == "tabela_parceiros":
+        colunas_numericas = ['ID_CLIENTE', 'CODTAB', 'ID_VENDEDOR']
+        df = tratar_colunas_numericas(df, colunas_numericas)
+    
+    colunas_criticas = {
+        "tabela_produtos": ['CODPROD', 'DESCRPROD', 'PRECO_CX'],
+        "tabela_parceiros": ['ID_CLIENTE', 'FANTASIA', 'CODTAB']
     }
     
-    for col_esperada, possiveis_nomes in padroes.items():
-        for col_disponivel in colunas_disponiveis:
-            col_lower = col_disponivel.lower()
-            for padrao in possiveis_nomes:
-                if padrao in col_lower:
-                    mapeamento[col_esperada] = col_disponivel
-                    st.sidebar.write(f"   ✅ '{col_disponivel}' → '{col_esperada}'")
-                    break
-            if col_esperada in mapeamento:
-                break
+    if nome_tabela in colunas_criticas:
+        colunas_check = colunas_criticas[nome_tabela]
+        colunas_existentes = [col for col in colunas_check if col in df.columns]
+        
+        if colunas_existentes:
+            linhas_antes = len(df)
+            df = df.dropna(subset=colunas_existentes)
     
-    return mapeamento
+    return df
 
-# Função para renomear colunas
-def renomear_colunas(df, mapeamento):
-    """
-    Renomeia as colunas do DataFrame baseado no mapeamento
-    """
-    return df.rename(columns=mapeamento)
+# =============================================
+# CARREGAMENTO DAS TABELAS DO GITHUB
+# =============================================
 
-# Função para carregar dados
-def load_data(uploaded_file, file_type):
-    """
-    Função para carregar arquivo CSV ou XLSX com tratamento robusto de erros
-    """
-    try:
-        if file_type == 'xlsx':
-            # Processar arquivo XLSX
-            df = processar_xlsx(uploaded_file)
-            if df is None:
-                return None
-            
-            # Tentar mapear colunas automaticamente
-            mapeamento = mapear_colunas(df)
-            
-            if mapeamento:
-                df = renomear_colunas(df, mapeamento)
-                st.sidebar.success("✅ Colunas mapeadas automaticamente")
+@st.cache_data(ttl=3600)
+def carregar_todas_tabelas():
+    """Carrega todas as tabelas necessárias do GitHub"""
+    with st.spinner("🔄 Carregando base de dados..."):
+        resultados = {}
+        
+        for nome_tabela, url in CONFIG_URLS.items():
+            try:
+                response = requests.get(url)
+                response.raise_for_status()
                 
-        else:
-            # Processar arquivo CSV
-            content = uploaded_file.getvalue().decode('utf-8')
-            
-            # Tentar diferentes delimitadores
-            delimiters = [',', ';', '\t']
-            df = None
-            
-            for delimiter in delimiters:
                 try:
-                    uploaded_file.seek(0)
-                    df = pd.read_csv(
-                        uploaded_file, 
-                        delimiter=delimiter,
-                        decimal=',', 
-                        thousands='.',
-                        encoding='utf-8'
-                    )
-                    
-                    if len(df.columns) > 1:
-                        st.sidebar.info(f"Delimitador detectado: '{delimiter}'")
-                        break
-                        
-                except Exception:
-                    continue
-            
-            # Se não conseguiu com delimitadores comuns, tentar leitura básica
-            if df is None or len(df.columns) <= 1:
-                uploaded_file.seek(0)
-                df = pd.read_csv(uploaded_file, encoding='utf-8')
+                    df = pd.read_csv(io.StringIO(response.text), encoding='utf-8', sep=';')
+                except:
+                    try:
+                        df = pd.read_csv(io.StringIO(response.text), encoding='utf-8', sep=',')
+                    except:
+                        try:
+                            df = pd.read_csv(io.StringIO(response.text), encoding='latin-1', sep=';')
+                        except:
+                            df = pd.read_csv(io.StringIO(response.text), encoding='latin-1', sep=',')
+                
+                df = verificar_e_corrigir_dados(df, nome_tabela)
+                resultados[nome_tabela] = df
+                
+            except Exception as e:
+                st.error(f"❌ Erro ao carregar {nome_tabela}")
+                resultados[nome_tabela] = criar_dados_exemplo(nome_tabela)
         
-        # Verificar se as colunas necessárias existem
-        required_columns = ['EAN', 'Descrição', 'QTD', 'Preco CX', 'Preco UN', 'Grupo']
-        
-        # Mostrar colunas disponíveis
-        st.sidebar.write("🔍 Colunas detectadas:", list(df.columns))
-        
-        # Verificar colunas faltando
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            st.error(f"❌ Colunas faltando: {missing_columns}")
-            st.info("📋 Colunas disponíveis: " + ", ".join(df.columns))
-            
-            # Tentar encontrar colunas similares
-            st.info("🔍 Tentando encontrar colunas similares...")
-            for req_col in missing_columns:
-                for col in df.columns:
-                    if req_col.lower() in str(col).lower():
-                        st.info(f"   • '{req_col}' pode ser: '{col}'")
-                        break
-            
-            return None
-        
-        # Limpar e converter dados
-        df_clean = df.copy()
-        
-        # Converter colunas numéricas
-        numeric_columns = ['QTD', 'Preco CX', 'Preco UN']
-        for col in numeric_columns:
-            if col in df_clean.columns:
-                df_clean[col] = df_clean[col].astype(str).str.replace(',', '.').str.strip()
-                df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
-        
-        # Converter EAN para string
-        if 'EAN' in df_clean.columns:
-            df_clean['EAN'] = df_clean['EAN'].astype(str)
-        
-        # Remover linhas com valores NaN críticos
-        colunas_criticas = ['Descrição', 'Preco CX', 'Preco UN']
-        for col in colunas_criticas:
-            if col in df_clean.columns:
-                df_clean = df_clean.dropna(subset=[col])
-        
-        st.sidebar.success(f"✅ Dados processados: {len(df_clean)} produtos válidos")
-        return df_clean
-        
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar o arquivo: {str(e)}")
-        return None
+        return resultados
 
-# Função para calcular preços com desconto
+def criar_dados_exemplo(nome_tabela):
+    """Cria dados de exemplo para desenvolvimento"""
+    if nome_tabela == "tabela_produtos":
+        return pd.DataFrame({
+            'CODPROD': [2, 4, 6, 8, 10, 12],
+            'REFERENCIA': ['7897518200014', '7897518200045', '7897518200656', '7897518200052', '7897518200069', '7897518200076'],
+            'DESCRPROD': [
+                'TEMPERO COMPLETO ESPECIAL 500G SADIO',
+                'TEMPERO SEM PIMENTA 500G SADIO',
+                'TEMPERO CASEIRO TRADICIONAL ESCURO VERDE 500G SADIO',
+                'VINAGRE DE ALCOOL 500ML SADIO',
+                'VINAGRE DE ALCOOL 1L SADIO',
+                'VINAGRE DE ALCOOL 2L SADIO'
+            ],
+            'CODTAB': [16, 16, 16, 16, 16, 16],
+            'PRECO_UNITARIO': [3.61, 3.61, 3.16, 1.48, 2.80, 5.20],
+            'QUANTIDADE': [12.0, 12.0, 12.0, 12.0, 12.0, 12.0],
+            'PRECO_CX': [43.32, 43.32, 37.92, 17.76, 33.60, 62.40]
+        })
+    
+    elif nome_tabela == "tabela_parceiros":
+        return pd.DataFrame({
+            'ID_CLIENTE': [4, 101, 102, 103, 104, 105],
+            'FANTASIA': [
+                'INDUSTRIAS SM - CEARA',
+                'NORDESTAO ALECRIM LJ 1',
+                'NORDESTAO PETROPOLIS LJ 2',
+                'NORDESTAO LAGOA NOVA LJ 3',
+                'NORDESTAO CIDADE JARDIM LJ 4',
+                'NORDESTAO SANTA CATARINA LJ 5'
+            ],
+            'CODTAB': [23, 3, 3, 3, 3, 3],
+            'ID_VENDEDOR': [0, 18, 18, 18, 57, 18],
+            'VENDEDOR': ['<SEM VENDEDOR>', 'ANDRE.RN', 'ANDRE.RN', 'ANDRE.RN', 'PAULINO.RN', 'ANDRE.RN'],
+            'CIDADE': ['MARACANAU', 'Natal', 'Natal', 'Natal', 'Natal', 'Natal'],
+            'GRUPODESC': ['', 'NORDESTAO', 'NORDESTAO', 'NORDESTAO', 'NORDESTAO', 'NORDESTAO']
+        })
+
+# =============================================
+# SISTEMA DE CÁLCULO EM TEMPO REAL
+# =============================================
+
+def calcular_desconto_tempo_real(preco_base, quantidade, tipo_preco, desconto_percentual=0, desconto_reais=0):
+    """Calcula os efeitos do desconto em tempo real"""
+    if preco_base <= 0:
+        return {
+            'preco_final_unitario': 0,
+            'total_sem_desconto': 0,
+            'total_com_desconto': 0,
+            'desconto_total': 0,
+            'desconto_percentual_final': 0,
+            'economia_por_unidade': 0
+        }
+    
+    # Calcular preço unitário com desconto
+    if desconto_reais > 0:
+        preco_final_unitario = preco_base - desconto_reais
+        desconto_percentual_final = (desconto_reais / preco_base) * 100
+    else:
+        preco_final_unitario = preco_base * (1 - desconto_percentual / 100)
+        desconto_percentual_final = desconto_percentual
+    
+    # Calcular totais
+    total_sem_desconto = preco_base * quantidade
+    total_com_desconto = preco_final_unitario * quantidade
+    desconto_total = total_sem_desconto - total_com_desconto
+    economia_por_unidade = preco_base - preco_final_unitario
+    
+    return {
+        'preco_final_unitario': preco_final_unitario,
+        'total_sem_desconto': total_sem_desconto,
+        'total_com_desconto': total_com_desconto,
+        'desconto_total': desconto_total,
+        'desconto_percentual_final': desconto_percentual_final,
+        'economia_por_unidade': economia_por_unidade
+    }
+
+# =============================================
+# SISTEMA DE CARRINHO E SIMULAÇÃO
+# =============================================
+
+def adicionar_ao_carrinho(produto, quantidade, tipo_preco, desconto_percentual=0, desconto_reais=0):
+    """Adiciona produto ao carrinho de compras"""
+    if 'carrinho' not in st.session_state:
+        st.session_state.carrinho = []
+    
+    # Calcular preços finais
+    preco_base = produto['PRECO_CX'] if tipo_preco == 'CX' else produto['PRECO_UNITARIO']
+    
+    if desconto_reais > 0:
+        resultado = calcular_preco_com_desconto_reais(preco_base, desconto_reais, quantidade)
+        desconto_percentual = resultado['desconto_percentual']
+    else:
+        resultado = calcular_precos_com_desconto(preco_base, quantidade, desconto_percentual, tipo_preco)
+    
+    item = {
+        'codprod': produto['CODPROD'],
+        'descricao': produto['DESCRPROD'],
+        'quantidade': quantidade,
+        'tipo_preco': tipo_preco,
+        'preco_base': preco_base,
+        'desconto_percentual': desconto_percentual,
+        'desconto_reais': desconto_reais,
+        'preco_unitario_com_desconto': resultado['preco_unitario_com_desconto'],
+        'total_com_desconto': resultado['total_com_desconto'],
+        'total_sem_desconto': resultado['total_sem_desconto'],
+        'desconto_total': resultado['desconto_total']
+    }
+    
+    st.session_state.carrinho.append(item)
+    st.success(f"✅ {produto['DESCRPROD']} adicionado ao carrinho!")
+
 def calcular_precos_com_desconto(preco_base, quantidade, desconto_percentual, tipo_preco='CX'):
-    """
-    Calcula preços com desconto aplicado
-    """
+    """Calcula preços com desconto aplicado"""
     desconto_decimal = desconto_percentual / 100
     preco_com_desconto = preco_base * (1 - desconto_decimal)
     
-    if tipo_preco == 'CX':
-        total = preco_com_desconto * quantidade
-        total_sem_desconto = preco_base * quantidade
-    else:  # UN
-        total = preco_com_desconto * quantidade
-        total_sem_desconto = preco_base * quantidade
-    
+    total = preco_com_desconto * quantidade
+    total_sem_desconto = preco_base * quantidade
     desconto_total = total_sem_desconto - total
     
     return {
@@ -233,424 +291,506 @@ def calcular_precos_com_desconto(preco_base, quantidade, desconto_percentual, ti
         'desconto_total': desconto_total
     }
 
-# Função para converter desconto em R$ para porcentagem
-def converter_desconto_reais_para_percentual(desconto_reais, preco_base):
-    """
-    Converte desconto em R$ para porcentagem
-    """
-    if preco_base > 0:
-        return (desconto_reais / preco_base) * 100
-    return 0
-
-# Função para calcular preço com desconto em R$
 def calcular_preco_com_desconto_reais(preco_base, desconto_reais, quantidade):
-    """
-    Calcula preço com desconto direto em R$
-    """
+    """Calcula preço com desconto direto em R$"""
     preco_com_desconto = preco_base - desconto_reais
     total_com_desconto = preco_com_desconto * quantidade
     total_sem_desconto = preco_base * quantidade
     desconto_total = total_sem_desconto - total_com_desconto
+    desconto_percentual = (desconto_reais / preco_base) * 100 if preco_base > 0 else 0
     
     return {
         'preco_unitario_com_desconto': preco_com_desconto,
         'total_com_desconto': total_com_desconto,
         'total_sem_desconto': total_sem_desconto,
-        'desconto_total': desconto_total
+        'desconto_total': desconto_total,
+        'desconto_percentual': desconto_percentual
     }
 
-# Sidebar para upload do arquivo
-st.sidebar.header("📁 Importar Tabela de Preços")
+def limpar_carrinho():
+    """Limpa o carrinho de compras"""
+    st.session_state.carrinho = []
+    st.success("🛒 Carrinho limpo!")
 
-uploaded_file = st.sidebar.file_uploader(
-    "Carregue o arquivo com a tabela de preços",
-    type=['csv', 'xlsx'],
-    help="Suporte para CSV e XLSX. Para XLSX: linhas 1-2 serão excluídas, linha 3 será o cabeçalho, e última linha removida."
-)
+# =============================================
+# CARDS DE RESUMO
+# =============================================
 
-# Determinar o tipo de arquivo
-file_type = None
-if uploaded_file is not None:
-    if uploaded_file.name.endswith('.xlsx'):
-        file_type = 'xlsx'
-        st.sidebar.info("📊 Arquivo XLSX detectado")
-    else:
-        file_type = 'csv'
-        st.sidebar.info("📄 Arquivo CSV detectado")
-
-# Inicializar session state
-if 'produtos_selecionados' not in st.session_state:
-    st.session_state.produtos_selecionados = []
-if 'df_produtos' not in st.session_state:
-    st.session_state.df_produtos = None
-if 'sync_desconto' not in st.session_state:
-    st.session_state.sync_desconto = None
-
-# Processar arquivo carregado
-if uploaded_file is not None and file_type:
-    with st.spinner('Carregando e processando arquivo...'):
-        df_loaded = load_data(uploaded_file, file_type)
-        if df_loaded is not None:
-            st.session_state.df_produtos = df_loaded
-            st.sidebar.success(f"✅ Arquivo carregado: {len(df_loaded)} produtos")
-            
-            # Mostrar estatísticas rápidas
-            col1, col2, col3, col4 = st.sidebar.columns(4)
-            with col1:
-                st.metric("Total Produtos", len(df_loaded))
-            with col2:
-                st.metric("Grupos", df_loaded['Grupo'].nunique())
-            with col3:
-                preco_medio_cx = df_loaded['Preco CX'].mean() 
-                st.metric("Preço Médio CX", f"R$ {preco_medio_cx:.2f}")
-            with col4:
-                preco_medio_un = df_loaded['Preco UN'].mean()
-                st.metric("Preço Médio UN", f"R$ {preco_medio_un:.2f}")
-
-# Layout principal
-if st.session_state.df_produtos is not None:
-    df = st.session_state.df_produtos
+def mostrar_cards_resumo():
+    """Mostra os cards com o resumo financeiro"""
+    if 'carrinho' not in st.session_state or not st.session_state.carrinho:
+        return
     
-    # Colunas para busca e filtros
-    col1, col2, col3 = st.columns([2, 1, 1])
+    carrinho = st.session_state.carrinho
+    
+    # Calcular totais
+    total_sem_desconto = sum(item['total_sem_desconto'] for item in carrinho)
+    total_com_desconto = sum(item['total_com_desconto'] for item in carrinho)
+    total_desconto_valor = total_sem_desconto - total_com_desconto
+    total_desconto_percentual = (total_desconto_valor / total_sem_desconto * 100) if total_sem_desconto > 0 else 0
+    total_itens = sum(item['quantidade'] for item in carrinho)
+    
+    # Cards
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        busca = st.text_input("🔍 Buscar produto:", placeholder="Digite o nome, código ou EAN...")
+        st.metric(
+            label="💰 Valor Total",
+            value=f"R$ {total_com_desconto:,.2f}",
+            delta=f"R$ {total_sem_desconto:,.2f} s/ desc"
+        )
     
     with col2:
-        grupo_filter = st.selectbox(
-            "Filtrar por grupo:",
-            ["Todos"] + list(df['Grupo'].unique())
+        st.metric(
+            label="🎯 Desconto Total (R$)",
+            value=f"R$ {total_desconto_valor:,.2f}",
+            delta=f"{total_desconto_percentual:.1f}%"
         )
     
     with col3:
-        marca_options = ["Todos"]
-        if 'Marca' in df.columns:
-            marca_options.extend(list(df['Marca'].unique()))
-        marca_filter = st.selectbox("Filtrar por marca:", marca_options)
+        st.metric(
+            label="📊 Desconto Total (%)",
+            value=f"{total_desconto_percentual:.1f}%",
+            delta=f"R$ {total_desconto_valor:,.2f}"
+        )
     
-    # Aplicar filtros
-    df_filtrado = df.copy()
+    with col4:
+        st.metric(
+            label="📦 Total de Itens",
+            value=f"{total_itens:.0f}",
+            delta=f"{len(carrinho)} produtos"
+        )
+
+# =============================================
+# RELATÓRIO FINAL
+# =============================================
+
+def gerar_relatorio():
+    """Gera relatório final da simulação"""
+    if not st.session_state.carrinho:
+        st.warning("📝 Nenhum item no carrinho para gerar relatório")
+        return
     
-    if busca:
-        mask = (df_filtrado['Descrição'].str.contains(busca, case=False, na=False)) | \
-               (df_filtrado['Cod'].astype(str).str.contains(busca, na=False)) | \
-               (df_filtrado['EAN'].astype(str).str.contains(busca, na=False))
-        df_filtrado = df_filtrado[mask]
+    st.subheader("📊 Relatório da Simulação")
     
-    if grupo_filter != "Todos":
-        df_filtrado = df_filtrado[df_filtrado['Grupo'] == grupo_filter]
+    # Dados da simulação
+    parceiro = st.session_state.parceiro_selecionado
+    vendedor = st.session_state.vendedor_logado
+    data_simulacao = datetime.now().strftime("%d/%m/%Y %H:%M")
     
-    if marca_filter != "Todos" and 'Marca' in df_filtrado.columns:
-        df_filtrado = df_filtrado[df_filtrado['Marca'] == marca_filter]
+    # Informações do parceiro
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.write("**🏢 Parceiro:**", parceiro['FANTASIA'])
+    with col2:
+        st.write("**👤 Vendedor:**", vendedor)
+    with col3:
+        st.write("**📅 Data:**", data_simulacao)
     
-    # Mostrar produtos filtrados
-    st.subheader(f"📦 Produtos Disponíveis ({len(df_filtrado)})")
+    # Tabela de itens
+    st.subheader("🛒 Itens da Simulação")
     
-    # Selecionar colunas para exibição
-    colunas_exibicao = ['Cod', 'Descrição', 'QTD', 'Preco CX', 'Preco UN', 'Grupo']
-    if 'Marca' in df_filtrado.columns:
-        colunas_exibicao.append('Marca')
+    dados_relatorio = []
+    total_geral_sem_desconto = 0
+    total_geral_com_desconto = 0
+    total_desconto = 0
     
-    # Mostrar apenas as colunas que existem no DataFrame
-    colunas_exibicao = [col for col in colunas_exibicao if col in df_filtrado.columns]
+    for item in st.session_state.carrinho:
+        dados_relatorio.append({
+            'Produto': item['descricao'],
+            'Quantidade': item['quantidade'],
+            'Tipo': item['tipo_preco'],
+            'Preço Base': f"R$ {item['preco_base']:.2f}",
+            'Preço c/ Desc.': f"R$ {item['preco_unitario_com_desconto']:.2f}",
+            'Desc. %': f"{item['desconto_percentual']:.1f}%",
+            'Total s/ Desc.': f"R$ {item['total_sem_desconto']:.2f}",
+            'Total c/ Desc.': f"R$ {item['total_com_desconto']:.2f}",
+            'Economia': f"R$ {item['desconto_total']:.2f}"
+        })
+        
+        total_geral_sem_desconto += item['total_sem_desconto']
+        total_geral_com_desconto += item['total_com_desconto']
+        total_desconto += item['desconto_total']
     
-    st.dataframe(
-        df_filtrado[colunas_exibicao].head(50),
-        use_container_width=True,
-        height=300
+    st.dataframe(pd.DataFrame(dados_relatorio), use_container_width=True)
+    
+    # Resumo financeiro
+    st.subheader("💰 Resumo Financeiro")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Valor Total s/ Desconto", f"R$ {total_geral_sem_desconto:,.2f}")
+    with col2:
+        st.metric("Valor Total c/ Desconto", f"R$ {total_geral_com_desconto:,.2f}")
+    with col3:
+        st.metric("Desconto Total", f"R$ {total_desconto:,.2f}")
+    with col4:
+        percentual_desconto = (total_desconto / total_geral_sem_desconto * 100) if total_geral_sem_desconto > 0 else 0
+        st.metric("Desconto %", f"{percentual_desconto:.1f}%")
+    
+    # Ações finais
+    st.subheader("🚀 Ações Finais")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📧 Enviar Proposta", use_container_width=True):
+            st.success("✅ Proposta enviada com sucesso!")
+            st.info("📋 Um email foi enviado para o cliente com os detalhes da simulação")
+    
+    with col2:
+        if st.button("💾 Salvar Simulação", use_container_width=True):
+            st.success("✅ Simulação salva no histórico!")
+    
+    with col3:
+        if st.button("🔄 Nova Simulação", use_container_width=True):
+            limpar_carrinho()
+            st.rerun()
+
+# =============================================
+# INTERFACE PRINCIPAL DO SIMULADOR
+# =============================================
+
+def mostrar_simulador():
+    """Interface principal do simulador"""
+    st.title("🧮 Sadio | Simulador Comercial")
+    st.markdown("---")
+    
+    # Sidebar
+    st.sidebar.header("👤 Configurações")
+    st.sidebar.write(f"**Vendedor logado:** {st.session_state.vendedor_logado}")
+    
+    if st.session_state.eh_master:
+        st.sidebar.success("👑 **MODO MASTER ATIVADO**")
+        st.sidebar.info("Acesso completo a todos os dados")
+    
+    if st.sidebar.button("🚪 Logout"):
+        st.session_state.logado = False
+        st.session_state.vendedor_logado = None
+        st.session_state.eh_master = False
+        st.session_state.carrinho = []
+        st.rerun()
+    
+    # Carregar dados
+    if 'dados_carregados' not in st.session_state:
+        st.session_state.dados_carregados = carregar_todas_tabelas()
+    
+    dados = st.session_state.dados_carregados
+    tabela_produtos = dados['tabela_produtos']
+    tabela_parceiros = dados['tabela_parceiros']
+    
+    # Filtrar parceiros - se for master, mostra todos, senão filtra pelo vendedor
+    if st.session_state.eh_master:
+        parceiros_filtrados = tabela_parceiros
+        st.sidebar.info(f"👑 Master: Visualizando todos os {len(parceiros_filtrados)} parceiros")
+    else:
+        parceiros_filtrados = tabela_parceiros[tabela_parceiros['VENDEDOR'] == st.session_state.vendedor_logado]
+        st.sidebar.info(f"Visualizando {len(parceiros_filtrados)} parceiros do vendedor")
+    
+    if parceiros_filtrados.empty:
+        st.error("❌ Nenhum parceiro encontrado")
+        return
+    
+    # Seleção do parceiro
+    st.sidebar.subheader("🏢 Seleção do Parceiro")
+    
+    opcoes_parceiros = []
+    for _, parceiro in parceiros_filtrados.iterrows():
+        descricao = f"{parceiro['ID_CLIENTE']} - {parceiro['FANTASIA']} ({parceiro['CIDADE']}) - {parceiro['VENDEDOR']}"
+        opcoes_parceiros.append((descricao, parceiro['ID_CLIENTE'], parceiro['CODTAB'], parceiro['VENDEDOR']))
+    
+    parceiro_options = [op[0] for op in opcoes_parceiros]
+    
+    parceiro_selecionado_desc = st.sidebar.selectbox(
+        "Selecione o Parceiro:",
+        ["Selecione um parceiro..."] + parceiro_options
     )
     
-    # Seção para adicionar produtos à simulação
-    st.subheader("➕ Adicionar Produto à Simulação")
+    if parceiro_selecionado_desc != "Selecione um parceiro...":
+        id_cliente_selecionado = int(parceiro_selecionado_desc.split(' - ')[0])
+        parceiro_info = parceiros_filtrados[parceiros_filtrados['ID_CLIENTE'] == id_cliente_selecionado].iloc[0]
+        
+        st.session_state.parceiro_selecionado = parceiro_info
+        st.session_state.codtab_atual = parceiro_info['CODTAB']
+        
+        # Carregar produtos do parceiro
+        produtos_parceiro = obter_produtos_por_codtab(parceiro_info['CODTAB'], tabela_produtos)
+        st.session_state.tabela_precos_atual = produtos_parceiro
+        
+        st.sidebar.success(f"✅ {parceiro_info['FANTASIA']}")
+        if st.session_state.eh_master:
+            st.sidebar.info(f"Vendedor: {parceiro_info['VENDEDOR']}")
     
-    if len(df_filtrado) > 0:
-        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+    # Mostrar simulador se parceiro selecionado
+    if 'tabela_precos_atual' in st.session_state and st.session_state.tabela_precos_atual is not None and len(st.session_state.tabela_precos_atual) > 0:
+        df = st.session_state.tabela_precos_atual
+        
+        # Header do parceiro
+        if st.session_state.parceiro_selecionado is not None:
+            parceiro = st.session_state.parceiro_selecionado
+            st.subheader(f"🏢 Simulando para: {parceiro['FANTASIA']}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("👤 Vendedor", st.session_state.vendedor_logado)
+            with col2:
+                st.metric("📊 Tabela", f"CODTAB {parceiro['CODTAB']}")
+            with col3:
+                st.metric("📍 Cidade", parceiro['CIDADE'])
+            with col4:
+                if st.session_state.eh_master and 'VENDEDOR' in parceiro:
+                    st.metric("👥 Vendedor Parceiro", parceiro['VENDEDOR'])
+        
+        # =============================================
+        # SEÇÃO 1: TABELA DE CONSULTA DE PRODUTOS
+        # =============================================
+        st.subheader("📦 Tabela de Produtos Disponíveis")
+        
+        # Filtro de busca
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            busca = st.text_input(
+                "🔍 Buscar produto:", 
+                placeholder="Digite código, descrição ou referência...",
+                key="busca_produto"
+            )
+        with col2:
+            st.metric("Produtos", len(df))
+        
+        # Aplicar filtro
+        df_filtrado = df.copy()
+        if busca:
+            mask = (
+                df_filtrado['DESCRPROD'].astype(str).str.contains(busca, case=False, na=False) |
+                df_filtrado['CODPROD'].astype(str).str.contains(busca, case=False, na=False) |
+                df_filtrado['REFERENCIA'].astype(str).str.contains(busca, case=False, na=False)
+            )
+            df_filtrado = df_filtrado[mask]
+            st.info(f"📊 {len(df_filtrado)} produtos encontrados")
+        
+        # Formatar tabela para exibição
+        df_display = df_filtrado[['CODPROD', 'DESCRPROD', 'PRECO_UNITARIO', 'QUANTIDADE', 'PRECO_CX']].copy()
+        df_display['PRECO_UNITARIO'] = df_display['PRECO_UNITARIO'].apply(lambda x: f"R$ {x:.2f}")
+        df_display['PRECO_CX'] = df_display['PRECO_CX'].apply(lambda x: f"R$ {x:.2f}")
+        df_display['QUANTIDADE'] = df_display['QUANTIDADE'].apply(lambda x: f"{x:.0f} un")
+        
+        # Mostrar tabela de produtos
+        st.dataframe(
+            df_display,
+            use_container_width=True,
+            height=400
+        )
+        
+        # =============================================
+        # SEÇÃO 2: SELEÇÃO DE PRODUTOS PARA CARRINHO
+        # =============================================
+        st.subheader("🛒 Adicionar Produtos ao Carrinho")
+        
+        # Seleção de produto
+        col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 2])
         
         with col1:
-            produto_selecionado = st.selectbox(
-                "Selecionar produto:",
-                df_filtrado['Descrição'].values,
-                key="produto_select"
+            # Criar opções para selectbox
+            opcoes_produtos = [f"{row['CODPROD']} - {row['DESCRPROD']} (R$ {row['PRECO_CX']:.2f}/CX)" 
+                              for _, row in df_filtrado.iterrows()]
+            
+            if opcoes_produtos:
+                produto_selecionado = st.selectbox(
+                    "Selecione o produto:",
+                    options=["Selecione um produto..."] + opcoes_produtos,
+                    key="select_produto"
+                )
+            else:
+                produto_selecionado = "Selecione um produto..."
+                st.warning("Nenhum produto encontrado para os filtros aplicados")
+        
+        with col2:
+            quantidade = st.number_input(
+                "Quantidade:",
+                min_value=1,
+                value=1,
+                key="quantidade_produto"
             )
         
-        if produto_selecionado:
-            produto_info = df_filtrado[df_filtrado['Descrição'] == produto_selecionado].iloc[0]
+        with col3:
+            tipo_preco = st.selectbox(
+                "Tipo:",
+                ["CX", "UN"],
+                key="tipo_preco"
+            )
+        
+        # =============================================
+        # SEÇÃO 2.1: CÁLCULO EM TEMPO REAL DE DESCONTO
+        # =============================================
+        # Obter preço base do produto selecionado
+        preco_base = 0
+        if produto_selecionado != "Selecione um produto...":
+            codprod_selecionado = int(produto_selecionado.split(' - ')[0])
+            produto_info = df_filtrado[df_filtrado['CODPROD'] == codprod_selecionado].iloc[0]
+            preco_base = produto_info['PRECO_CX'] if tipo_preco == 'CX' else produto_info['PRECO_UNITARIO']
+        
+        col4, col5 = st.columns(2)
+        
+        with col4:
+            # Campo de desconto percentual
+            desconto_percentual = st.number_input(
+                "Desconto %:",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.0,
+                step=0.5,
+                key="desconto_percentual",
+                help="Digite o desconto em porcentagem"
+            )
+            
+            # Calcular e mostrar equivalente em R$
+            if desconto_percentual > 0 and preco_base > 0:
+                desconto_reais_calculado = preco_base * (desconto_percentual / 100)
+                st.info(f"💡 Equivale a: R$ {desconto_reais_calculado:.2f} por unidade")
+        
+        with col5:
+            # Campo de desconto em R$
+            desconto_reais = st.number_input(
+                "Desconto R$:",
+                min_value=0.0,
+                max_value=float(preco_base) if preco_base > 0 else 0.0,
+                value=0.0,
+                step=0.1,
+                key="desconto_reais",
+                help="Digite o desconto em reais"
+            )
+            
+            # Calcular e mostrar equivalente em %
+            if desconto_reais > 0 and preco_base > 0:
+                desconto_percentual_calculado = (desconto_reais / preco_base) * 100
+                st.info(f"💡 Equivale a: {desconto_percentual_calculado:.1f}%")
+        
+        # =============================================
+        # SEÇÃO 2.2: VISUALIZAÇÃO EM TEMPO REAL
+        # =============================================
+        if produto_selecionado != "Selecione um produto..." and preco_base > 0:
+            st.markdown("---")
+            st.subheader("📊 Visualização em Tempo Real")
+            
+            # Calcular efeitos do desconto
+            calculo_tempo_real = calcular_desconto_tempo_real(
+                preco_base, quantidade, tipo_preco, desconto_percentual, desconto_reais
+            )
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Preço Unitário Base (CX)",
+                    f"R$ {preco_base:.2f}",
+                    f"R$ {calculo_tempo_real['economia_por_unidade']:.2f} (Unidade)",
+                    delta_color="off"
+                )
             
             with col2:
-                tipo_venda = st.radio("Tipo:", ["Caixa", "Unidade"], horizontal=True)
+                st.metric(
+                    "Total do Item",
+                    f"R$ {calculo_tempo_real['total_com_desconto']:.2f}",
+                    f"R$ {calculo_tempo_real['total_sem_desconto']:.2f} s/ desc",
+                    delta_color="off"
+                )
             
             with col3:
-                quantidade = st.number_input("Quantidade:", min_value=1, value=1, step=1)
-            
-            with col4:
-                st.write("Preços:")
-                if tipo_venda == "Caixa":
-                    preco_cx = produto_info['Preco CX']
-                    st.write(f"**R$ {preco_cx:.2f}**/CX")
-                    preco_base = preco_cx
-                    preco_unitario = preco_cx
-                else:
-                    preco_un = produto_info['Preco UN']
-                    st.write(f"**R$ {preco_un:.2f}**/UN")
-                    preco_base = preco_un
-                    preco_unitario = preco_un
-            
-            # Seção de desconto
-            st.subheader("🎯 Configurar Desconto")
-            
-            col5, col6 = st.columns(2)
-            
-            with col5:
-                st.markdown("**🔘 Desconto em Porcentagem**")
-                
-                slider_value = 0.0
-                if st.session_state.sync_desconto == 'slider':
-                    slider_value = st.session_state.get('last_slider_value', 0.0)
-                
-                desconto_slider = st.slider(
-                    "Desconto (%)",
-                    min_value=0.0,
-                    max_value=50.0,
-                    value=slider_value,
-                    step=0.5,
-                    key="desconto_slider"
-                )
-                
-                desconto_equivalente_reais = preco_unitario * (desconto_slider / 100)
-                
-                calculo_slider = calcular_precos_com_desconto(
-                    preco_unitario, quantidade, desconto_slider, 
-                    'CX' if tipo_venda == 'Caixa' else 'UN'
-                )
-                
                 st.metric(
-                    "Preço com Desconto",
-                    f"R$ {calculo_slider['preco_unitario_com_desconto']:.2f}",
-                    delta=f"-{desconto_slider:.1f}%"
+                    "Desconto do Item",
+                    f"R$ {calculo_tempo_real['desconto_total']:.2f}",
+                    f"{calculo_tempo_real['desconto_percentual_final']:.1f}%",
+                    delta_color="inverse"
                 )
-                st.caption(f"Equivale a: R$ {desconto_equivalente_reais:.2f} de desconto")
-            
-            with col6:
-                st.markdown("**💰 Desconto em Valor (R$)**")
-                
-                desconto_maximo_reais = preco_unitario * 0.9
-                
-                manual_value = 0.0
-                if st.session_state.sync_desconto == 'manual':
-                    manual_value = st.session_state.get('last_manual_value', 0.0)
-                
-                desconto_manual_reais = st.number_input(
-                    "Valor do Desconto (R$)",
-                    min_value=0.0,
-                    max_value=float(desconto_maximo_reais),
-                    value=manual_value,
-                    step=0.10,
-                    format="%.2f",
-                    key="desconto_manual_reais"
-                )
-                
-                desconto_equivalente_percentual = converter_desconto_reais_para_percentual(desconto_manual_reais, preco_unitario)
-                
-                calculo_reais = calcular_preco_com_desconto_reais(preco_unitario, desconto_manual_reais, quantidade)
-                
-                st.metric(
-                    "Preço com Desconto",
-                    f"R$ {calculo_reais['preco_unitario_com_desconto']:.2f}",
-                    delta=f"-R$ {desconto_manual_reais:.2f}"
-                )
-                st.caption(f"Equivale a: {desconto_equivalente_percentual:.1f}% de desconto")
-            
-            # Sincronizar campos
-            col7, col8 = st.columns(2)
-            
-            with col7:
-                if st.button("🔄 Usar % em R$", use_container_width=True):
-                    st.session_state.sync_desconto = 'manual'
-                    st.session_state.last_manual_value = desconto_equivalente_reais
-                    st.rerun()
-            
-            with col8:
-                if st.button("🔄 Usar R$ em %", use_container_width=True):
-                    st.session_state.sync_desconto = 'slider'
-                    st.session_state.last_slider_value = min(desconto_equivalente_percentual, 50.0)
-                    st.rerun()
-            
-            # Escolher tipo de desconto
-            st.markdown("**🎯 Qual tipo de desconto usar na simulação?**")
-            col9, col10 = st.columns(2)
-            
-            with col9:
-                usar_desconto = st.radio(
-                    "Selecione o tipo de desconto:",
-                    ["Usar Porcentagem", "Usar Valor em R$"],
-                    horizontal=True,
-                    key="fonte_desconto"
-                )
-            
-            with col10:
-                if usar_desconto == "Usar Porcentagem":
-                    desconto_final_percentual = desconto_slider
-                    desconto_final_reais = desconto_equivalente_reais
-                    tipo = "Porcentagem"
-                    preco_final = calculo_slider['preco_unitario_com_desconto']
-                    total_final = calculo_slider['total_com_desconto']
-                    calculo_final = calculo_slider
-                else:
-                    desconto_final_percentual = desconto_equivalente_percentual
-                    desconto_final_reais = desconto_manual_reais
-                    tipo = "Reais"
-                    preco_final = calculo_reais['preco_unitario_com_desconto']
-                    total_final = calculo_reais['total_com_desconto']
-                    calculo_final = calculo_reais
-                
-                st.info(f"**Desconto selecionado:**")
-                st.info(f"**{desconto_final_percentual:.1f}%** | **R$ {desconto_final_reais:.2f}**")
-                st.success(f"**Preço final:** R$ {preco_final:.2f}")
-                st.success(f"**Total do item:** R$ {total_final:.2f}")
-            
-            # Botão para adicionar à simulação
-            col11, col12, col13 = st.columns([1, 2, 1])
-            
-            with col12:
-                if st.button("➕ Adicionar à Simulação", use_container_width=True, type="primary"):
-                    novo_produto = {
-                        'codigo': produto_info['Cod'],
-                        'descricao': produto_info['Descrição'],
-                        'tipo': tipo_venda,
-                        'quantidade': quantidade,
-                        'preco_base': preco_unitario,
-                        'desconto_percentual': desconto_final_percentual,
-                        'desconto_reais': desconto_final_reais,
-                        'preco_com_desconto': calculo_final['preco_unitario_com_desconto'],
-                        'total_com_desconto': calculo_final['total_com_desconto'],
-                        'total_sem_desconto': calculo_final['total_sem_desconto'],
-                        'desconto_total': calculo_final['desconto_total'],
-                        'tipo_desconto': tipo
-                    }
-                    
-                    st.session_state.produtos_selecionados.append(novo_produto)
-                    st.success(f"✅ Produto adicionado! Desconto: {desconto_final_percentual:.1f}% (R$ {desconto_final_reais:.2f})")
-                    st.rerun()
-    else:
-        st.warning("⚠️ Nenhum produto encontrado com os filtros aplicados.")
-    
-    # Seção da simulação
-    if st.session_state.produtos_selecionados:
-        st.subheader("🛒 Simulação Comercial")
         
-        # Tabela de produtos na simulação
-        dados_simulacao = []
-        for i, produto in enumerate(st.session_state.produtos_selecionados):
-            dados_simulacao.append({
-                'Item': i + 1,
-                'Código': produto['codigo'],
-                'Descrição': produto['descricao'],
-                'Tipo': produto['tipo'],
-                'Qtd': produto['quantidade'],
-                'Preço Base': f"R$ {produto['preco_base']:.2f}",
-                'Desconto %': f"{produto['desconto_percentual']:.1f}%",
-                'Desconto R$': f"R$ {produto['desconto_reais']:.2f}",
-                'Tipo Desc.': produto['tipo_desconto'],
-                'Preço c/ Desc': f"R$ {produto['preco_com_desconto']:.2f}",
-                'Total': f"R$ {produto['total_com_desconto']:.2f}"
-            })
-        
-        df_simulacao = pd.DataFrame(dados_simulacao)
-        st.dataframe(df_simulacao, use_container_width=True)
-        
-        # Resumo financeiro
-        st.subheader("📊 Resumo da Simulação")
-        
-        total_sem_desconto = sum(p['total_sem_desconto'] for p in st.session_state.produtos_selecionados)
-        total_com_desconto = sum(p['total_com_desconto'] for p in st.session_state.produtos_selecionados)
-        total_desconto = sum(p['desconto_total'] for p in st.session_state.produtos_selecionados)
-        percentual_desconto_medio = (total_desconto / total_sem_desconto * 100) if total_sem_desconto > 0 else 0
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total sem Desconto", f"R$ {total_sem_desconto:.2f}")
+        # Botão para adicionar ao carrinho
+        col1, col2 = st.columns([4, 1])
         with col2:
-            st.metric("Total com Desconto", f"R$ {total_com_desconto:.2f}")
-        with col3:
-            st.metric("Desconto Total", f"R$ {total_desconto:.2f}")
-        with col4:
-            st.metric("Desconto Médio", f"{percentual_desconto_medio:.1f}%")
-        
-        # Botões de ação
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🔄 Limpar Simulação", use_container_width=True):
-                st.session_state.produtos_selecionados = []
-                st.session_state.sync_desconto = None
+            if st.button("➕ Adicionar ao Carrinho", use_container_width=True, 
+                        disabled=produto_selecionado == "Selecione um produto..."):
+                # Encontrar produto selecionado
+                codprod_selecionado = int(produto_selecionado.split(' - ')[0])
+                produto_info = df_filtrado[df_filtrado['CODPROD'] == codprod_selecionado].iloc[0]
+                
+                adicionar_ao_carrinho(produto_info, quantidade, tipo_preco, desconto_percentual, desconto_reais)
                 st.rerun()
         
-        with col2:
-            # Criar DataFrame para exportação
-            export_data = []
-            for produto in st.session_state.produtos_selecionados:
-                export_data.append({
-                    'Código': produto['codigo'],
-                    'Descrição': produto['descricao'],
-                    'Tipo_Venda': produto['tipo'],
-                    'Quantidade': produto['quantidade'],
-                    'Preço_Base': produto['preco_base'],
-                    'Desconto_Percentual': produto['desconto_percentual'],
-                    'Desconto_Reais': produto['desconto_reais'],
-                    'Tipo_Desconto': produto['tipo_desconto'],
-                    'Preço_Com_Desconto': produto['preco_com_desconto'],
-                    'Total_Com_Desconto': produto['total_com_desconto']
-                })
+        # =============================================
+        # SEÇÃO 3: CARDS DE RESUMO
+        # =============================================
+        st.markdown("---")
+        mostrar_cards_resumo()
+        
+        # =============================================
+        # SEÇÃO 4: TABELA DO CARRINHO (PARCIAL)
+        # =============================================
+        st.markdown("---")
+        st.subheader("📋 Carrinho de Compras - Parcial")
+        
+        if 'carrinho' in st.session_state and st.session_state.carrinho:
+            # Criar DataFrame do carrinho
+            carrinho_df = pd.DataFrame(st.session_state.carrinho)
             
-            df_export = pd.DataFrame(export_data)
-            csv = df_export.to_csv(index=False, decimal=',', sep=';')
+            # Formatar colunas para exibição
+            carrinho_display = carrinho_df[[
+                'descricao', 'quantidade', 'tipo_preco', 'preco_base', 
+                'desconto_percentual', 'preco_unitario_com_desconto', 'total_com_desconto'
+            ]].copy()
             
-            st.download_button(
-                label="💾 Exportar Simulação",
-                data=csv,
-                file_name=f"simulacao_comercial_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-else:
-    # Tela inicial quando não há arquivo carregado
-    st.info("👆 Por favor, carregue um arquivo CSV ou XLSX com a tabela de preços na sidebar para começar.")
+            carrinho_display['preco_base'] = carrinho_display['preco_base'].apply(lambda x: f"R$ {x:.2f}")
+            carrinho_display['preco_unitario_com_desconto'] = carrinho_display['preco_unitario_com_desconto'].apply(lambda x: f"R$ {x:.2f}")
+            carrinho_display['total_com_desconto'] = carrinho_display['total_com_desconto'].apply(lambda x: f"R$ {x:.2f}")
+            carrinho_display['desconto_percentual'] = carrinho_display['desconto_percentual'].apply(lambda x: f"{x:.1f}%")
+            
+            # Renomear colunas
+            carrinho_display.columns = [
+                'Produto', 'Quantidade', 'Tipo', 'Preço Base', 
+                'Desc. %', 'Preço c/ Desc.', 'Total'
+            ]
+            
+            # Mostrar tabela do carrinho
+            st.dataframe(carrinho_display, use_container_width=True)
+            
+            # Botões de ação
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                if st.button("📊 Gerar Relatório Completo", use_container_width=True):
+                    gerar_relatorio()
+            with col2:
+                if st.button("🗑️ Limpar Carrinho", use_container_width=True):
+                    limpar_carrinho()
+                    st.rerun()
+        else:
+            st.info("🛒 Carrinho vazio. Selecione produtos acima para começar a simulação.")
     
-    # Exemplo de estrutura esperada
-    st.subheader("📋 Estrutura Esperada do Arquivo")
-    
-    exemplo_data = {
-        'EAN': ['7898950000000', '7898950000000', '7898950000000'],
-        'NCM': ['34029039', '34029039', '34029039'],
-        'Cod': [9880, 9881, 9882],
-        'Descrição': [
-            'DETERGENTE LIMAO 500ML TANLUX | CX - 20/500ML',
-            'DETERGENTE MACA 500ML TANLUX | CX - 20/500ML', 
-            'DETERGENTE NEUTRO 500ML TANLUX | CX - 20/500ML'
-        ],
-        'QTD': [20.00, 20.00, 20.00],
-        'X': ['X', 'X', 'X'],
-        'Peso': [500, 500, 500],
-        'Preco CX': [21.00, 21.00, 21.00],
-        'Preco UN': [1.05, 1.05, 1.05],
-        'Grupo': ['DETERGENTE', 'DETERGENTE', 'DETERGENTE'],
-        'Peso CX': [10.8, 10.8, 10.8],
-        'Ultima Venda': ['', '', ''],
-        'Valor Ultima Venda': [0.00, 0.00, 0.00],
-        'Cod Grupo': [10200100, 10200100, 10200100],
-        'Marca': ['TANLUX', 'TANLUX', 'TANLUX'],
-        'DUN': ['17899000000000', '17899000000000', '17899000000000']
-    }
-    
-    df_exemplo = pd.DataFrame(exemplo_data)
-    st.dataframe(df_exemplo, use_container_width=True)
+    else:
+        st.info("👆 Selecione um parceiro na sidebar para começar a simulação.")
 
-# Rodapé
-st.markdown("---")
-st.markdown(
-    "**Sadio | Simulador Comercial** - Para suporte, entre em contato com o administrador do sistema - Daniel Babo."
+# =============================================
+# FUNÇÕES AUXILIARES
+# =============================================
 
-)
+def obter_produtos_por_codtab(codtab_cliente, tabela_produtos):
+    """Obtém os produtos da tabela de preços específica do cliente"""
+    try:
+        codtab_cliente = int(codtab_cliente)
+        tabela_produtos['CODTAB'] = tabela_produtos['CODTAB'].astype(int)
+        produtos_filtrados = tabela_produtos[tabela_produtos['CODTAB'] == codtab_cliente]
+        return produtos_filtrados
+    except Exception as e:
+        st.error(f"Erro ao carregar produtos: {str(e)}")
+        return pd.DataFrame()
+
+# =============================================
+# APLICAÇÃO PRINCIPAL
+# =============================================
+
+def main():
+    """Função principal da aplicação"""
+    if not verificar_login():
+        fazer_login()
+    else:
+        mostrar_simulador()
+
+if __name__ == "__main__":
+    main()
